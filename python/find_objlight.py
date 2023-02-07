@@ -119,7 +119,6 @@ class Hologram(object):
         else:
             self.bg = np.zeros(hologram.shape)
         self.hologram = hologram-self.bg
-        self.hologram = (self.hologram-np.min(self.hologram))/(np.max(self.hologram)-np.min(self.hologram)) #normalized
 
 
         # Rebin the hologram
@@ -147,6 +146,7 @@ class Hologram(object):
         self.random_seed = random_seed
         self.mask_radius = 0
         self.shifted_spectrum = np.zeros(self.hologram.shape)
+        self.origin_spectrum = self.fft.fft2(self.hologram)
 
     @classmethod
     def from_file(cls,file_path,**kwargs):
@@ -164,19 +164,19 @@ class Hologram(object):
         hologram = _load_hologram(file_path)
         return cls(hologram, **kwargs)
 
-    def get_shifted_spectrum(self,plot_fourier_peak=False,search_area=None):
+    def get_shifted_spectrum(self,plot_fourier_peak=False,interested_region=None):
         ft_hologram = self.fft.fft2(self.hologram)
 
         # Create mask based on coords of spectral peak:
         if self.rebin_factor != 1:
-            self.mask_radius = 150./self.rebin_factor
+            self.mask_radius = 50./self.rebin_factor
         elif self.crop_fraction is not None and self.crop_fraction != 0:
-            self.mask_radius = 150./abs(np.log(self.crop_fraction)/np.log(2))
+            self.mask_radius = 50./abs(np.log(self.crop_fraction)/np.log(2))
         else:
-            self.mask_radius = 150.
+            self.mask_radius = 50.
 
         x_peak, y_peak = self.fourier_peak_centroid(ft_hologram, self.mask_radius,
-                                                    plot=plot_fourier_peak,search_area=search_area)
+                                                    plot=plot_fourier_peak,interested_region=interested_region)
 
         mask = self.real_image_mask(x_peak, y_peak)
 
@@ -185,38 +185,38 @@ class Hologram(object):
         return  shifted_ft_hologram
 
     def reconstruct(self, propagation_distance=15.5e-2,
-                        plot_fourier_peak=False,search_area=None):
-            """
-            Reconstruct wave from hologram stored in file ``hologram_path`` at
-            propagation distance ``propagation_distance``.
+                    plot_fourier_peak=False,search_area=None):
+        """
+        Reconstruct wave from hologram stored in file ``hologram_path`` at
+        propagation distance ``propagation_distance``.
 
-            Parameters
-            ----------
-            propagation_distance : float
-                Propagation distance [m]
-            plot_aberration_correction : bool
-                Plot the abberation correction visualization? Default is False.
-            plot_fourier_peak : bool
-                Plot the peak-centroiding visualization of the fourier transform
-                of the hologram? Default is False.
+        Parameters
+        ----------
+        propagation_distance : float
+            Propagation distance [m]
+        plot_aberration_correction : bool
+            Plot the abberation correction visualization? Default is False.
+        plot_fourier_peak : bool
+            Plot the peak-centroiding visualization of the fourier transform
+            of the hologram? Default is False.
 
-            Returns
-            -------
-            reconstructed_wave : `~numpy.ndarray` (complex)
-                Reconstructed wave from hologram
-            """
+        Returns
+        -------
+        reconstructed_wave : `~numpy.ndarray` (complex)
+            Reconstructed wave from hologram
+        """
 
-            # # Calculate Fourier transform of impulse response function
-            G = self.ft_impulse_resp_func(propagation_distance)
+        # # Calculate Fourier transform of impulse response function
+        G = self.ft_impulse_resp_func(propagation_distance)
 
-            shifted_ft_hologram = self.get_shifted_spectrum(plot_fourier_peak=plot_fourier_peak,search_area=search_area)
-            self.shifted_spectrum = shifted_ft_hologram
-            psi = G*shifted_ft_hologram
-            # #
-            reconstructed_wave = fftshift(self.fft.ifft2(psi))
-            return reconstructed_wave
+        shifted_ft_hologram = self.get_shifted_spectrum(plot_fourier_peak=plot_fourier_peak,search_area=search_area)
+        self.shifted_spectrum = shifted_ft_hologram
+        psi = G*shifted_ft_hologram
+        # #
+        reconstructed_wave = fftshift(self.fft.ifft2(psi))
+        return reconstructed_wave
 
-    def fourier_peak_centroid(self, fourier_arr, mask_radius=None, plot=False,search_area = None):
+    def fourier_peak_centroid(self, fourier_arr, mask_radius=None, plot=False,interested_region = None):
         """
         Calculate the centroid of the signal spike in Fourier space near the
         frequencies of the real image.
@@ -241,17 +241,11 @@ class Hologram(object):
         #abs_fourier_arr = np.abs(fourier_arr)[margin:-margin, margin:-margin]
         # abs_fourier_arr = np.abs(fourier_arr)[margin:self.n//2, margin:-margin]
         mask_margin=10
-        if search_area:
+        if interested_region:
             mask = np.zeros(fourier_arr.shape)
             mid_point = int(self.hologram.shape[0]/2)
-            if search_area =='upper_left':
-                mask[mask_margin:(mid_point-mask_margin),mask_margin:(mid_point-mask_margin)]=1
-            elif search_area =='bottom_left':
-                mask[(mid_point+mask_margin):int(self.hologram.shape[0]-mask_margin),mask_margin:(mid_point-mask_margin)]=1
-            elif search_area == "upper_right":
-                mask[mask_margin:(mid_point-mask_margin),(mid_point+mask_margin):int(self.hologram.shape[0]-mask_margin)]=1
-            elif search_area=="bottom_right":
-                mask[(mid_point+mask_margin):int(self.hologram.shape[0]-mask_margin),(mid_point+mask_margin):int(self.hologram.shape[0]-mask_margin)]=1
+            [vmin,vmax,hmin,hmax] = interested_region
+            mask[vmin:vmax,hmin:hmax] = 1
             target_spectrum = fourier_arr * mask
         else:
             target_spectrum=fourier_arr
@@ -266,9 +260,9 @@ class Hologram(object):
                                                 gaussian_width=10)
 
         if self.n-spectrum_centroid[0]-mask_margin>self.mask_radius and self.n-spectrum_centroid[1]-mask_margin>self.mask_radius:
-             self.mask_radius = self.mask_radius
+            self.mask_radius = self.mask_radius
         else:
-             self.mask_radius = max([min([self.n-spectrum_centroid[0]-mask_margin,self.n-spectrum_centroid[1]-mask_margin]),0])
+            self.mask_radius = max([min([self.n-spectrum_centroid[0]-mask_margin,self.n-spectrum_centroid[1]-mask_margin]),0])
 
 
         if plot:
@@ -425,19 +419,13 @@ if __name__ == "__main__":
 
     hologram_path = '/Users/zhangyunping/PycharmProjects/offaxisDH/Data/offaxis/holo2.bmp'
     bg =  '/Users/zhangyunping/PycharmProjects/offaxisDH/Data/offaxis/bg_both.bmp'
-    # hologram_path = '/Users/zhangyunping/PycharmProjects/offaxisDH/Data/checkbg/bg_both7.bmp'
+    # hologram_path = '/Users/zhangyunping/PycharmProjects/offaxisDH/Data/checkbg/bg_both8.bmp'
     # Construct the hologram object, reconstruct the complex wave
-    h = Hologram.from_file(hologram_path,crop_size=1024,bg=bg,wavelength=650e-9, dx=3.45e-6*2, dy=3.45e-6*2,)
-    shifted_spectrum= h.get_shifted_spectrum(plot_fourier_peak=True,search_area='bottom_left')
-    # h.reconstruct(plot_fourier_peak=True,search_area='bottom_left')
+    h = Hologram.from_file(hologram_path,crop_size=1024,bg=bg,wavelength=650e-9, dx=3.45e-6*2, dy=3.45e-6*2)
+    ori_spectrum = h.origin_spectrum
     fig,ax = plt.subplots()
-    ax.imshow(np.log(np.abs(shifted_spectrum)),interpolation='nearest')
-    plt.show()
-    #generate kernel
-    propagation_distance = 15.5e-2
-    G = h.ft_impulse_resp_func(propagation_distance)
-    reconstructed_wave = fftshift(h.fft.ifft2(G*shifted_spectrum))
-    fig,ax = plt.subplots()
-    ax.imshow(np.abs(reconstructed_wave),interpolation='nearest')
-    plt.show()
-    # h.reconstruct(plot_fourier_peak=True,search_area='upper_right')
+    ax.imshow(np.log(np.abs(ori_spectrum)),interpolation='nearest')
+    plt.savefig('/Users/zhangyunping/PycharmProjects/offaxisDH/ft_bg/minus_bg.png')
+
+
+

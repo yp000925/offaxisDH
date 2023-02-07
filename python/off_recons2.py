@@ -5,6 +5,9 @@ from fftutils import FFT, fftshift
 import matplotlib.pyplot as plt
 from skimage.restoration import unwrap_phase as skimage_unwrap_phase
 from mpl_toolkits.axes_grid1 import ImageGrid
+from metricutils import mix_metric
+
+from tqdm import tqdm
 random_seed = 42
 float_precision = np.float64
 complex_precision = np.complex128
@@ -119,6 +122,7 @@ class Hologram(object):
         else:
             self.bg = np.zeros(hologram.shape)
         self.hologram = hologram-self.bg
+        self.hologram = (self.hologram-np.min(self.hologram))/(np.max(self.hologram)-np.min(self.hologram)) #normalized
 
 
         # Rebin the hologram
@@ -428,7 +432,9 @@ if __name__ == "__main__":
     plt.show()
 
     # interested region = [vmin,vmax,hmin,hmax]
-    shifted_spectrum= h.get_shifted_spectrum(plot_fourier_peak=True,interested_region=[300,600,400,700])
+    shifted_spectrum= h.get_shifted_spectrum(plot_fourier_peak=True,interested_region=[600,800,400,500])
+    # shifted_spectrum= h.get_shifted_spectrum(plot_fourier_peak=True,interested_region=[800,1000,300,400])
+    # shifted_spectrum= h.get_shifted_spectrum(plot_fourier_peak=True,interested_region=[400,600,150,250])
     # h.reconstruct(plot_fourier_peak=True,search_area='bottom_left')
     fig,ax = plt.subplots()
     ax.imshow(np.log(np.abs(shifted_spectrum)),interpolation='nearest')
@@ -441,3 +447,34 @@ if __name__ == "__main__":
     ax.imshow(np.abs(reconstructed_wave),interpolation='nearest')
     plt.show()
     # h.reconstruct(plot_fourier_peak=True,search_area='upper_right')
+    dist = np.arange(0.11,0.21,0.0001)
+    lap = []
+    gra = []
+    tc = []
+    for i in tqdm(range(len(dist))):
+        propagation_distance = dist[i]
+        G = h.ft_impulse_resp_func(propagation_distance)
+        reconstructed_wave = fftshift(h.fft.ifft2(G*shifted_spectrum))
+        _lap,_gra,_tc= mix_metric(np.abs(reconstructed_wave))
+        lap.append(_lap)
+        gra.append(_gra)
+        tc.append(_tc)
+        if i%50==0:
+            print(i)
+            np.save('lap',lap)
+            np.save('gra',gra)
+            np.save('tc',tc)
+    np.save('lap',lap)
+    np.save('gra',gra)
+    np.save('tc',tc)
+    fig,ax = plt.subplots(3)
+    ax[0].plot(np.arange(i),gra)
+    ax[1].plot(np.arange(i),lap)
+    ax[2].plot(np.arange(i),tc)
+        # fig,ax = plt.subplots()
+        # ax.imshow(np.abs(reconstructed_wave),interpolation='nearest')
+        # ax.set_title("d = {0}".format(propagation_distance))
+        # # plt.show()
+        # plt.savefig('/Users/zhangyunping/PycharmProjects/offaxisDH/output/{0}.png'.format(propagation_distance))
+        # break
+
